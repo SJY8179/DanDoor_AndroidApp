@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 각 실험 기록 아이템 하나하나의 UI 모양을 정의합니다. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="?android:attr/selectableItemBackground"
+    android:clickable="true"
+    android:focusable="true">
+
+    <!-- 실험 별칭(alias)을 표시할 TextView -->
+    <TextView
+        android:id="@+id/tv_lab_alias"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:text="실험 데이터 예시" />
+
+    <!-- 실험 생성 날짜(createdAt)를 표시할 TextView -->
+    <TextView
+        android:id="@+id/tv_lab_date"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textSize="12sp"
+        android:text="2025-07-04" />
+
+</LinearLayout>

@@ -1,227 +1,110 @@
 package com.dandoor.androidApp
 
 import android.os.Bundle
-import android.os.CountDownTimer
-import android.view.View
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import android.widget.Toast
-import android.widget.ToggleButton
+import android.view.MenuItem
+import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
-import com.dandoor.ddlib.bluetooth.DandoorBTManager
-import com.dandoor.ddlib.bluetooth.DandoorBTVehicle
-import com.dandoor.ddlib.repository.DataManager
-import com.google.android.material.progressindicator.CircularProgressIndicator
+import androidx.drawerlayout.widget.DrawerLayout
+import androidx.lifecycle.lifecycleScope
+import androidx.navigation.findNavController
+import androidx.navigation.fragment.NavHostFragment
+import androidx.navigation.ui.setupWithNavController
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import com.dandoor.androidApp.database.AppDatabase
+import com.dandoor.androidApp.databinding.ActivityMainBinding
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
-    /** UI Component */
-    private lateinit var tvBleStatus: TextView
-    private lateinit var btnConnectBluetooth: Button
-    private lateinit var btnLabToggle: ToggleButton
-    private lateinit var btnEngineToggle: ToggleButton
-    private lateinit var progressTimer: CircularProgressIndicator
-    private lateinit var etMinutes: EditText
-    private lateinit var etSeconds: EditText
-    private lateinit var tvTimerDisplay: TextView
-
-    /** 타이머 관련 변수 */
-    private var countDownTimer: CountDownTimer? = null
-    private var totalTimeInSeconds = 0
-    private var isTimerRunning = false
-
-    private lateinit var btManager: DandoorBTManager
-    private lateinit var dtManager: DataManager
+    // ViewBinding 객체. activity_main.xml의 뷰들을 직접 참조할 수 있게 해줍니다.
+    private lateinit var binding: ActivityMainBinding
+    // 사이드 바(드로어) 레이아웃 객체
+    private lateinit var drawerLayout: DrawerLayout
+    // 툴바의 햄버거 아이콘과 드로어의 열고 닫힘을 연결해주는 토글 버튼
+    private lateinit var toggle: ActionBarDrawerToggle
+    // 사이드 바의 RecyclerView를 위한 어댑터
+    private lateinit var labHistoryAdapter: LabHistoryAdapter
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.main)
+        // ViewBinding을 사용하여 레이아웃을 로드하고 화면에 표시합니다.
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
 
-        // DataManger 초기화
-        dtManager = DataManager(this)
+        // 각 UI 요소를 설정하는 함수들을 순서대로 호출합니다.
+        setupToolbarAndDrawer()
+        setupRecyclerView()
+        setupBottomNav()
+        loadLabHistory()
+    }
 
-        // BluetoothManger 초기화
-        btManager = DandoorBTManager(this, dtManager)
-        btManager.checkBTPermission(this) {granted ->
-            if (granted) {
-                setVehicleCallback()
-            } else {
-                Toast.makeText(this, "권한이 필요합니다.", Toast.LENGTH_SHORT).show()
+    // 툴바와 사이드 바(드로어)를 설정하는 함수
+    private fun setupToolbarAndDrawer() {
+        // XML의 Toolbar를 이 액티비티의 공식 액션바로 지정합니다.
+        setSupportActionBar(binding.toolbar)
+        drawerLayout = binding.drawerLayout
+        // ActionBarDrawerToggle을 생성하여 툴바와 드로어를 연결합니다.
+        toggle = ActionBarDrawerToggle(this, drawerLayout, binding.toolbar, R.string.navigation_drawer_open, R.string.navigation_drawer_close)
+        // 드로어에 토글 리스너를 추가합니다.
+        drawerLayout.addDrawerListener(toggle)
+        // 토글의 현재 상태(아이콘 모양 등)를 동기화합니다.
+        toggle.syncState()
+        // 툴바에 '홈' 버튼(햄버거 아이콘)을 표시하고 활성화합니다.
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setHomeButtonEnabled(true)
+    }
+
+    // 사이드 바의 RecyclerView를 설정하는 함수
+    private fun setupRecyclerView() {
+        // LabHistoryAdapter를 생성합니다. 아이템 클릭 시 동작을 람다 함수로 정의합니다.
+        labHistoryAdapter = LabHistoryAdapter { lab ->
+            // NavController를 찾아서 화면 이동을 처리합니다.
+            val navController = findNavController(R.id.fragmentContainer)
+            // Bundle 객체를 만들어 전달할 데이터를 담습니다.
+            val bundle = Bundle().apply {
+                putLong("SELECTED_LAB_ID", lab.labID)
             }
+            // nav_graph에 정의된 action을 실행하여 화면을 이동시킵니다. (데이터 포함)
+            navController.navigate(R.id.action_home_to_result, bundle)
+            // 화면 이동 후 사이드 바를 닫습니다.
+            drawerLayout.closeDrawers()
         }
-
-        initViews()
-        setupBtnListeners()
+        // NavigationView에서 RecyclerView를 찾아와 어댑터와 레이아웃 매니저를 설정합니다.
+        val recyclerView = binding.navView.findViewById<RecyclerView>(R.id.rv_lab_history)
+        recyclerView.adapter = labHistoryAdapter
+        recyclerView.layoutManager = LinearLayoutManager(this)
     }
 
-    /** 뷰 컴포넌트 초기화 (main_activity의 컴포넌트와 연결) */
-    private fun initViews() {
-        tvBleStatus = findViewById(R.id.tv_ble_status)
-        btnConnectBluetooth = findViewById(R.id.btn_connect_bluetooth)
-        btnLabToggle = findViewById(R.id.btn_lab_toggle)
-        btnEngineToggle = findViewById(R.id.btn_engine_toggle)
-        progressTimer = findViewById(R.id.progress_timer)
-        etMinutes = findViewById(R.id.et_minutes)
-        etSeconds = findViewById(R.id.et_seconds)
-        tvTimerDisplay = findViewById(R.id.tv_timer_display)
-
-        // 초기값 설정
-        etMinutes.setText("00")
-        etSeconds.setText("00")
+    // 하단 네비게이션 바를 설정하는 함수
+    private fun setupBottomNav() {
+        // NavHostFragment에서 NavController를 가져옵니다.
+        val navHostFragment = supportFragmentManager.findFragmentById(R.id.fragmentContainer) as NavHostFragment
+        val navController = navHostFragment.navController
+        // BottomNavigationView와 NavController를 연결하여, 메뉴 클릭 시 자동으로 화면이 전환되게 합니다.
+        binding.bottomNavigation.setupWithNavController(navController)
     }
 
-    /** 블루투스 연결, 랩 토글, 시동 토글 버튼 리스너 */
-    private fun setupBtnListeners() {
-        btnConnectBluetooth.setOnClickListener {
-            btManager.connectToCar()
-        }
-
-        btnLabToggle.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                // 입력값 파싱
-                val minutes = etMinutes.text.toString().toIntOrNull() ?: 0
-                val seconds = etSeconds.text.toString().toIntOrNull() ?: 0
-                totalTimeInSeconds = minutes * 60 + seconds
-
-                // 유효성 검사
-                if (totalTimeInSeconds <= 0) {
-                    Toast.makeText(this, "시간을 입력해주세요.", Toast.LENGTH_SHORT).show()
-                    btnLabToggle.isChecked = false;
-                } else {
-                    dtManager.createLabDefaultSync()
-                    btManager.startScan()
-                    startTimer()
-                }
-            }
-            else {
-                stopTimer()
-                btManager.stopScan()
-            }
-        }
-
-        btnEngineToggle.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) btManager.sendCarCommand("start")
-            else btManager.sendCarCommand("stop")
-        }
-    }
-
-
-    /** Timer
-     * startTimer()     :
-     * stopTImer()      :
-     * resetTimerUI()   :
-     * formatTime()     :
-     * */
-    private fun startTimer() {
-        if (isTimerRunning) return
-
-        // 입력값 파싱
-        val minutes = etMinutes.text.toString().toIntOrNull() ?: 0
-        val seconds = etSeconds.text.toString().toIntOrNull() ?: 0
-        totalTimeInSeconds = minutes * 60 + seconds
-
-        // 유효성 검사
-        if (totalTimeInSeconds <= 0) {
-            Toast.makeText(this, "시간을 입력해주세요.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        btnEngineToggle.isChecked = true
-        isTimerRunning = true
-
-        // 입력 UI 숨기기
-        etMinutes.visibility = View.GONE
-        etSeconds.visibility = View.GONE
-        findViewById<TextView>(R.id.textViewM).visibility = View.GONE
-        findViewById<TextView>(R.id.textViewS).visibility = View.GONE
-        tvTimerDisplay.visibility = View.VISIBLE  // 타이머 표시 UI 보이기
-
-        // 카운트다운 타이머 생성 및 시작
-        countDownTimer = object : CountDownTimer((totalTimeInSeconds * 1000).toLong(), 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                val secondsRemaining = (millisUntilFinished / 1000).toInt()
-                val progress = ((totalTimeInSeconds - secondsRemaining) * 100) / totalTimeInSeconds
-
-                progressTimer.progress = progress
-                tvTimerDisplay.text = formatTime(secondsRemaining)
-            }
-
-            override fun onFinish() {
-                progressTimer.progress = 100
-                btnLabToggle.isChecked = false
-                btnEngineToggle.isChecked = false
-                resetTimerUI()
-            }
-        }.start()
-    }
-    private fun stopTimer() {
-        countDownTimer?.cancel()
-        btnEngineToggle.isChecked = false
-        resetTimerUI()
-    }
-    private fun resetTimerUI() {
-        isTimerRunning = false
-        progressTimer.progress = 0
-
-        etMinutes.visibility = View.VISIBLE
-        etSeconds.visibility = View.VISIBLE
-        findViewById<TextView>(R.id.textViewM).visibility = View.VISIBLE
-        findViewById<TextView>(R.id.textViewS).visibility = View.VISIBLE
-        tvTimerDisplay.visibility = View.GONE
-    }
-    private fun formatTime(seconds: Int): String {
-        val minutes = seconds / 60
-        val remainingSeconds = seconds % 60
-        return String.format("%02d:%02d", minutes, remainingSeconds)
-    }
-
-
-    /** Bluetooth
-     * setVehicleCallback()          :
-     * onRequestPermissionsResult()   :
-     * updateBluetoothStatus(BOOL)    :
-     */
-    private fun setVehicleCallback() {
-        btManager.setVehicleCallback(object : DandoorBTVehicle.VehicleConnectionCallback {
-            override fun onConnectionStatusChanged(isConnected: Boolean, deviceName: String?) {
-                updateBluetoothStatus(isConnected)
-            }
-            override fun onConnectionError(error: String) {
-                Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
-            }
-            override fun onCommandSent(command: String) {
-                Toast.makeText(this@MainActivity, "명령 전송: $command", Toast.LENGTH_SHORT).show()
-            }
-            override fun onCommandError(error: String) {
-                Toast.makeText(this@MainActivity, error, Toast.LENGTH_SHORT).show()
-            }
-        })
-    }
-    // 권한 요청 결과 처리
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        btManager.onRequestPermissionResult(requestCode, grantResults) { allGranted ->
-            if (allGranted) {
-                setVehicleCallback()
-            } else {
-                Toast.makeText(this, "권한이 필요합니다", Toast.LENGTH_SHORT).show()
-            }
+    // 데이터베이스에서 실험 기록을 로드하는 함수
+    private fun loadLabHistory() {
+        // 데이터베이스 인스턴스와 DAO(Data Access Object)를 가져옵니다.
+        val labDao = AppDatabase.getDB(applicationContext).labDao()
+        // lifecycleScope를 사용하여 UI(액티비티)의 생명주기에 안전한 코루틴을 실행합니다.
+        lifecycleScope.launch {
+            // 백그라운드 스레드에서 DB 작업을 수행하여 UI 멈춤을 방지합니다.
+            val labs = labDao.getAllLabs()
+            // DB에서 가져온 데이터를 어댑터에 전달하여 화면에 표시합니다.
+            labHistoryAdapter.submitList(labs)
         }
     }
-    private fun updateBluetoothStatus(isConnected: Boolean) {
-        if (isConnected) {
-            tvBleStatus.text = "BLUETOOTH: 연결됨"
-            tvBleStatus.setTextColor(ContextCompat.getColor(this, R.color.status_connected))
+
+    // 툴바의 메뉴 아이템(햄버거 아이콘 등)이 클릭되었을 때 호출됩니다.
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        // 클릭 이벤트를 ActionBarDrawerToggle에게 먼저 전달하여 처리하도록 합니다.
+        // (햄버거 아이콘 클릭 시 드로어를 열고 닫는 동작)
+        if (toggle.onOptionsItemSelected(item)) {
+            return true
         }
-        else {
-            tvBleStatus.text = "BLUETOOTH: 연결 해제"
-            tvBleStatus.setTextColor(ContextCompat.getColor(this, R.color.status_disconnected))
-        }
+        return super.onOptionsItemSelected(item)
     }
 }
