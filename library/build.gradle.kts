@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     id("com.google.devtools.ksp")
+    // 1. @Parcelize 어노테이션을 사용하기 위한 플러그인
+    id("kotlin-parcelize")
 }
 
 android {
